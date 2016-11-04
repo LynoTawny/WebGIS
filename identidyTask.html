@@ -1,0 +1,356 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>拾取网格</title>
+    <link  rel="stylesheet"  type="text/css" href="http://localhost/arcgis_js_api/library/3.18/3.18/dijit/themes/tundra/tundra.css"/>
+    <link  rel="stylesheet"  type="text/css" href="http://localhost/arcgis_js_api/library/3.18/3.18/esri/css/esri.css" />    
+    <style>       
+        html, body, #main{	
+            width: 100%;
+            height: 100%;
+            margin: 0;
+        }
+    </style>
+	<!-- script type="text/javascript">
+	    dojoConfig = {
+	        isDebug: true,
+	        async: true
+	    };
+    </script -->
+    <script  type="text/Javascript" src="http://localhost/arcgis_js_api/library/3.18/3.18/init.js"></script>
+</head>
+<body class="tundra">
+    <div data-dojo-type="dijit/layout/BorderContainer" data-dojo-props="design:'headline',gutters:false"  id="main">
+        <div data-dojo-type="dijit/layout/ContentPane" data-dojo-props="region:'top'" 
+            style="background-color: #b39b86; height: 5%;">
+            恒扬数据
+        </div>
+        <div data-dojo-type="dijit/layout/ContentPane" data-dojo-props="region:'left', splitter:'true'"
+            style="background-color: #acb386; width: 100px;">
+            在这里添加菜单
+        </div>
+        <div id="mapDiv" data-dojo-type="dijit/layout/ContentPane" data-dojo-props="region:'center'"
+            style="background-color: #f5ffbf; padding: 0px;">            
+        </div> 
+        <div data-dojo-type="dijit/layout/ContentPane" data-dojo-props="region:'right', splitter:'true'"
+            style="background-color: #acb386; width: 100px;">
+            <div id="accordionContainer" data-dojo-type="dijit/layout/AccordionContainer" 
+                style="padding: 0px; overflow: hidden; z-index: 29;">
+                <div data-dojo-type="dijit/layout/ContentPane" title="工具盒1" style="overflow: hidden;">
+                    <div>
+                        <button data-dojo-type="dijit/form/Button">点</button>
+                    </div>
+                    <div>
+                        <button data-dojo-type="dijit/form/Button">多边形</button>
+                    </div>                    
+                </div>
+                <div id="identifyResultsPane" data-dojo-type="dijit/layout/ContentPane" style="overflow: hidden;" title="工具盒2">
+                    <div id="resultsDiv">
+                    </div>
+                    <br>
+                </div>
+                <div id="parcelResultsPane" data-dojo-type="dijit/layout/ContentPane" title="工具盒3">
+                </div>
+                <div data-dojo-type="dijit/layout/ContentPane" style="width: 100%" title="工具盒4">
+                    <br>
+                    <div id="layerConfigDiv">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div data-dojo-type="dijit/layout/ContentPane" data-dojo-props="region:'bottom', splitter:'true'"
+            style="background-color: #b39b86; height: 20px;">
+            在这里添加版权信息
+        </div>
+    </div>
+    
+    <!-- info window tabs -->
+    <!--
+    <div id="tabs" data-dojo-type="dijit/layout/TabContainer" style="width:385px;height:150px;">
+      <div id="layer4Tab" data-dojo-type="dijit/layout/ContentPane" title="省级行政区"></div>
+      <div id="layer3Tab" data-dojo-type="dijit/layout/ContentPane" title="公路"></div>
+      <div id="layer2Tab" data-dojo-type="dijit/layout/ContentPane" title="河流"></div>
+      <div id="layer1Tab" data-dojo-type="dijit/layout/ContentPane" title="铁路"></div>
+      <div id="layer0Tab" data-dojo-type="dijit/layout/ContentPane" title="省会"></div>
+    </div>
+    -->
+</body>
+</html>
+
+<script>
+var map, identifyTask, identifyParams;
+var pointSym, lineSym, polygonSym;
+/*
+var layer2results, layer1results, layer0results;
+var layer3results, layer4results;
+*/
+var gridResults;
+
+require(["dojo/parser", "dijit/registry", "esri/map", "esri/layers/ArcGISDynamicMapServiceLayer", "esri/toolbars/draw",
+    "esri/symbols/SimpleMarkerSymbol", "esri/symbols/SimpleLineSymbol", "esri/symbols/SimpleFillSymbol", "esri/Color",
+    "esri/tasks/IdentifyTask", "esri/tasks/IdentifyParameters", "esri/geometry/screenUtils",
+    "dijit/form/Button", "dijit/layout/TabContainer", "dijit/layout/ContentPane", "dojo/domReady!"],
+    function (parser, registry, Map, ArcGISDynamicMapServiceLayer, Draw,
+        SimpleMarkerSymbol, SimpleLineSymbol, SimpleFillSymbol, Color,
+        IdentifyTask, IdentifyParameters, screenUtils) {
+
+        parser.parse();
+
+        map = new Map("mapDiv", {
+            basemap: "osm",
+            //center: [114.434863,30.4641971],
+            center: [120.5,30.4],
+            zoom: 5
+        });
+        var url = "http://192.168.50.191:6080/arcgis/rest/services/MR/china_grid_100x100/MapServer";
+        var agoLayer = new ArcGISDynamicMapServiceLayer(url);
+        map.addLayer(agoLayer);
+        map.on("load", initIdentify);
+
+        var redColor = new Color([255, 0, 0]);
+        var halfFillYellow = new Color([255, 255, 0, 0.5]);
+        pointSym = new SimpleMarkerSymbol(SimpleMarkerSymbol.STYLE_DIAMOND, 10,
+                    new SimpleLineSymbol(SimpleLineSymbol.STYLE_SOLID, redColor, 1),
+                    halfFillYellow);
+        lineSym = new SimpleLineSymbol(SimpleLineSymbol.STYLE_DASHDOT, redColor, 2);
+        polygonSym = new SimpleFillSymbol(SimpleFillSymbol.STYLE_SOLID,
+                    new SimpleLineSymbol(SimpleLineSymbol.STYLE_SOLID, redColor, 2),
+                    halfFillYellow);        
+
+        /*
+        map.infoWindow.on("show", function () {
+            registry.byId("tabs").resize();
+        });
+        */
+
+        var tb = new Draw(map);
+        tb.on("draw-end", doIdentify);
+
+        console.info("NEXT: 遍历控件，注册按钮单击事件");
+        registry.forEach(function (d) {
+            console.info("遍历控件");
+            if (d.declaredClass === "dijit.form.Button") {
+                console.info("给按钮注册单击事件");
+                d.on("click", activateTool);
+            }
+        });
+        console.info("按钮事件注册完成");
+
+        function activateTool() {
+            var tool = null;
+            switch (this.label) {
+                case "点":
+                    tool = "POINT";
+                    break;
+                case "线":
+                    tool = "POLYLINE";
+                    break;
+                case "多边形":
+                    tool = "POLYGON";
+                    break;
+            }
+            tb.activate(Draw[tool]);
+            map.hideZoomSlider();
+        }
+
+        function initIdentify(evt) {
+            // 实例化IdentifyTask
+            identifyTask = new IdentifyTask(url);
+            // IdentifyTask参数设置
+            identifyParams = new IdentifyParameters();
+            // 冗余范围
+            identifyParams.tolerance = 3;
+            // 返回地理元素
+            identifyParams.returnGeometry = true;
+            // 进行Identify的图层
+            identifyParams.layerIds = [4, 3, 2, 1, 0];
+            
+            // 配置Identify的图层
+            identifyParams.layerOption = IdentifyParameters.LAYER_OPTION_ALL;
+
+            // 设置infoWindow的大小
+            //evt.map.infoWindow.resize(415, 200);
+            // 设置infoWindow的标题头
+            /*
+            evt.map.infoWindow.setTitle("Identify结果");
+            evt.map.infoWindow.setContent(registry.byId("tabs").domNode);
+            */
+        }
+
+        // 进行Identify
+        function doIdentify(evt) {
+            // 清除上一次的高亮显示
+            map.graphics.clear();
+            // Identify的geometry
+            identifyParams.geometry = evt.geometry;
+            // Identify范围
+            identifyParams.mapExtent = map.extent;
+            identifyTask.execute(identifyParams, function (idResults) {
+                addToMap(idResults, evt.geometry);
+            });
+        }
+
+        // 在infoWindow中显示Identify结果
+        function addToMap(idResults, geometry) {
+            /*
+            layer2results = { displayFieldName: null, features: [] };
+            layer1results = { displayFieldName: null, features: [] };
+            layer0results = { displayFieldName: null, features: [] };
+            layer3results = { displayFieldName: null, features: [] };
+            layer4results = { displayFieldName: null, features: [] };
+            */
+            gridResults = { displayFieldName: null, features: [] };
+            for (var i = 0, il = idResults.length; i < il; i++) {
+                var idResult = idResults[i];
+                console.info("Layer ID:" + idResult.layerId);
+                /*
+                if (idResult.layerId === 2) {
+                    if (!layer2results.displayFieldName) {
+                        layer2results.displayFieldName = idResult.displayFieldName;
+                    }
+                    layer2results.features.push(idResult.feature);
+                } else if (idResult.layerId === 1) {
+                    if (!layer1results.displayFieldName) {
+                        layer1results.displayFieldName = idResult.displayFieldName;
+                    }
+                    layer1results.features.push(idResult.feature);
+                } else if (idResult.layerId === 0) {
+                    if (!layer0results.displayFieldName) {
+                        layer0results.displayFieldName = idResult.displayFieldName;
+                    }
+                    layer0results.features.push(idResult.feature);
+                } else if(idResult.layerId === 3) {
+                    if (!layer3results.displayFieldName) {
+                        layer3results.displayFieldName = idResult.displayFieldName;
+                    }
+                    layer3results.features.push(idResult.feature);                
+                } else if(idResult.layerId === 4) {
+                    if (!layer4results.displayFieldName) {
+                        layer4results.displayFieldName = idResult.displayFieldName;
+                    }
+                    layer4results.features.push(idResult.feature);                
+                }
+                */
+                if(idResult.layerId === 0) {
+                    if (!gridResults.displayFieldName) {
+                        gridResults.displayFieldName = idResult.displayFieldName;
+                    }
+                    gridResults.features.push(idResult.feature);                    
+                }
+            }
+            /*
+            registry.byId("layer2Tab").setContent(layerTabContent(layer2results, "layer2results"));
+            registry.byId("layer1Tab").setContent(layerTabContent(layer1results, "layer1results"));
+            registry.byId("layer0Tab").setContent(layerTabContent(layer0results, "layer0results"));
+            registry.byId("layer3Tab").setContent(layerTabContent(layer3results, "layer3results"));
+            registry.byId("layer4Tab").setContent(layerTabContent(layer4results, "layer4results"));
+            */
+
+            // 设置infoWindow显示
+            /*
+            var firstPt;
+            if (geometry.type == "point")
+                firstPt = geometry;
+            else
+                firstPt = geometry.getPoint(0, 0);
+            var screenPoint = screenUtils.toScreenPoint(map.extent, map.width, map.height, firstPt);
+            map.infoWindow.show(screenPoint, map.getInfoWindowAnchor(screenPoint));
+            */
+            
+            showFeatures(gridResults);
+        }
+
+        function layerTabContent(layerResults, layerName) {
+            var content = "<i>选中要素数目为：" + layerResults.features.length + "</i>";
+            switch (layerName) {
+                case "layer2results":
+                    content += "<table border='1'><tr><th>ID</th><th>州名</th><th>面积</th></tr>";
+                    for (var i = 0, il = layerResults.features.length; i < il; i++) {
+                        content += "<tr><td>" + layerResults.features[i].attributes['FID'] + " <a href='#' onclick='showFeature(" + layerName + ".features[" + i + "]); return false;'>(显示)</a></td>";
+                        content += "<td>" + layerResults.features[i].attributes['STATE_NAME'] + "</td>";
+                        content += "<td>" + layerResults.features[i].attributes['AREA'] + "</td>";
+                    }
+                    content += "</tr></table>";
+                    break;
+                case "layer1results":
+                    content += "<table border='1'><tr><th>ID</th><th>名称</th></tr>";
+                    for (var i = 0, il = layerResults.features.length; i < il; i++) {
+                        content += "<tr><td>" + layerResults.features[i].attributes['FID'] + " <a href='#' onclick='showFeature(" + layerName + ".features[" + i + "]); return false;'>(显示)</a></td>";
+                        content += "<td>" + layerResults.features[i].attributes['NAME'] + "</td>";
+                    }
+                    content += "</tr></table>";
+                    break;
+                case "layer0results":
+                    content += "<table border='1'><tr><th>ID</th><th>名称</th><th>州名</th><th>人口</th></tr>";
+                    for (var i = 0, il = layerResults.features.length; i < il; i++) {
+                        content += "<tr><td>" + layerResults.features[i].attributes['FID'] + " <a href='#' onclick='showFeature(" + layerName + ".features[" + i + "]); return false;'>(显示)</a></td>";
+                        content += "<td>" + layerResults.features[i].attributes['CITY_NAME'] + "</td>";
+                        content += "<td>" + layerResults.features[i].attributes['STATE_NAME'] + "</td>";
+                        content += "<td>" + layerResults.features[i].attributes['POP1990'] + "</td>";
+                    }
+                    content += "</tr></table>";
+                    break;
+                case "layer3results":
+                    break;
+                case "layer4results":
+                    content += "<table border='1'><tr><th>ID</th><th>省</th><th>边界长度</th><th>面积</th></tr>";
+                    for (var i = 0, il = layerResults.features.length; i < il; i++) {
+                        content += "<tr><td>" + layerResults.features[i].attributes['FID'] + " <a href='#' onclick='showFeature(" + layerName + ".features[" + i + "]); return false;'>(显示)</a></td>";
+                        content += "<td>" + layerResults.features[i].attributes['NAME'] + "</td>";
+                        content += "<td>" + layerResults.features[i].attributes['Shape_Leng'] + "</td>";
+                        content += "<td>" + layerResults.features[i].attributes['Shape_Area'] + "</td>";
+                    }
+                    content += "</tr></table>";
+                    break;
+            }
+            return content;
+        }
+});
+
+// 高亮显示选中元素
+function showFeature(feature) {
+    map.graphics.clear();
+    var symbol;
+    // 将几何对象加入到地图中
+    switch (feature.geometry.type) {
+        case "point":
+            symbol = pointSym;
+            break;
+        case "polyline":
+            symbol = lineSym;
+            break;
+        case "polygon":
+            symbol = polygonSym;
+            break;
+    }
+
+    feature.setSymbol(symbol);
+    map.graphics.add(feature);
+}
+
+
+function showFeatures(gridResults) {
+    map.graphics.clear();
+    
+    for (var i = 0, il = gridResults.features.length; i < il; i++) {
+        var feature = gridResults.features[i];
+        var symbol;
+        // 将几何对象加入到地图中
+        switch (feature.geometry.type) {
+            case "point":
+                symbol = pointSym;
+                break;
+            case "polyline":
+                symbol = lineSym;
+                break;
+            case "polygon":
+                symbol = polygonSym;
+                break;
+        }
+        feature.setSymbol(symbol);
+        map.graphics.add(feature);
+    }
+}
+</script>
